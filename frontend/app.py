@@ -3,7 +3,7 @@ import dash_bootstrap_components as dbc
 import pandas as pd
 from dash.dependencies import Input, Output
 import plotly.express as px
-from geopy.geocoders import Nominatim
+from geopy.geocoders import Nominatim # type: ignore
 import plotly.graph_objects as go
 import json
 import os
