@@ -7,11 +7,17 @@ from geopy.geocoders import Nominatim # type: ignore
 import plotly.graph_objects as go
 import json
 import os
+from datetime import datetime
 
 app = Dash(__name__)
 
 # Load data
-data = pd.read_csv('./data/data.csv')
+def get_available_files():
+    data_dir = './data'
+    # Get all CSV files in the data directory
+    files = [f for f in os.listdir(data_dir) if f.endswith('.csv')]
+    return sorted(files, reverse=True)  # Most recent first
+
 
 # Cache file path
 CACHE_FILE = 'location_cache.json'
@@ -71,15 +77,24 @@ def prepare_data(data):
     save_cache(cache)
     return df
 
-# Rest of your code remains the same...
-# Prepare initial data
-prepared_data = prepare_data(data)
-
 app.layout = html.Div([
     # Outer container to center everything
     html.Div([
         html.H1('Road Condition Reporter', className='text-center mb-4', style={'text-align': 'center'}),
-        dcc.Store(id='store-data', data=prepared_data.to_dict('records')),
+        # File selection section
+        html.Div([
+            html.H5('Select Data File:', 
+                   style={'margin-bottom': '10px'}),
+            dcc.Dropdown(
+                id='file-selector',
+                options=[{'label': f, 'value': f} for f in get_available_files()],
+                value=get_available_files()[0] if get_available_files() else None,
+                style={'width': '100%', 'margin-bottom': '20px'}
+            ),
+            # File info display
+            html.Div(id='file-info', style={'margin-bottom': '20px'})
+        ], style={'margin-bottom': '30px'}),
+        dcc.Store(id='store-data'),
         html.Div(
             style={
                 'display': 'flex',
@@ -91,11 +106,11 @@ app.layout = html.Div([
             children=[
                 dcc.Graph(
                     id='line-graph',
-                    style={'width': '100%', 'height': '700px'}  # Increased height for rotated labels
+                    style={'width': '100%', 'height': '700px'}
                 ),
                 dcc.Graph(
                     id='box-plot',
-                    style={'width': '100%', 'height': '700px'}  # Increased height for rotated labels
+                    style={'width': '100%', 'height': '700px'}
                 ),
                 html.Div(
                     id='table',
@@ -104,7 +119,7 @@ app.layout = html.Div([
             ]
         )    
     ], style={
-        'width': '90%',  # Increased width for better label visibility
+        'width': '90%',
         'maxWidth': '1400px',
         'margin': '0 auto',
         'padding': '20px'
@@ -117,11 +132,51 @@ app.layout = html.Div([
 })
 
 @app.callback(
+    [Output('store-data', 'data'),
+     Output('file-info', 'children')],
+    Input('file-selector', 'value')
+)
+def load_and_prepare_data(selected_file):
+    if not selected_file:
+        return None, "No file selected"
+    
+    try:
+        # Load the data
+        file_path = os.path.join('./data', selected_file)
+        df = pd.read_csv(file_path)
+        
+        # Prepare the data
+        prepared_df = prepare_data(df)
+        
+        # Get file information
+        file_stats = os.stat(file_path)
+        file_size = file_stats.st_size / 1024  # Convert to KB
+        modified_time = datetime.fromtimestamp(file_stats.st_mtime)
+        
+        file_info = html.Div([
+            html.P(f"File: {selected_file}"),
+            html.P(f"Size: {file_size:.2f} KB"),
+            html.P(f"Last Modified: {modified_time.strftime('%Y-%m-%d %H:%M:%S')}"),
+            html.P(f"Number of Records: {len(df)}")
+        ], style={'background': '#f8f9fa', 'padding': '10px', 'border-radius': '5px'})
+        
+        return prepared_df.to_dict('records'), file_info
+        
+    except Exception as e:
+        return None, html.Div(f"Error loading file: {str(e)}", 
+                            style={'color': 'red'})
+
+@app.callback(
     Output('line-graph', 'figure'),
     Input('store-data', 'data')
 )
 def update_graph(data):
+    if not data:
+        return go.Figure()
+        
     df = pd.DataFrame(data)
+    if df.empty:
+        return go.Figure()
     
     # Create the figure
     fig = px.line(
@@ -142,20 +197,18 @@ def update_graph(data):
             bgcolor="white",
             font_size=12,
         ),
-        # Configure x-axis for rotated labels
         xaxis=dict(
-            tickangle=45,  # Rotate labels 45 degrees
+            tickangle=45,
             tickmode='array',
             ticktext=df['location_name'],
             tickvals=df['location_name'],
-            tickfont=dict(size=10),  # Smaller font size
+            tickfont=dict(size=10),
         ),
         yaxis=dict(
             gridcolor='LightGrey',
             showgrid=True,
             range=[0, 100]
         ),
-        # Add more margin at bottom for rotated labels
         margin=dict(b=150)
     )
     
@@ -163,7 +216,7 @@ def update_graph(data):
     fig.update_traces(
         hovertemplate="<br>".join([
             "<b>Location Point %{customdata[3]}</b>",
-            "%{x}",  # Location name
+            "%{x}",
             "Score: %{y}",
             "Coordinates: (%{customdata[0]:.2f}, %{customdata[1]:.2f})",
             "Time: %{customdata[2]}",
@@ -173,18 +226,21 @@ def update_graph(data):
     
     return fig
 
-
 @app.callback(
     Output('box-plot', 'figure'),
     Input('store-data', 'data')
 )
 def update_box_plot(data):
+    if not data:
+        return go.Figure()
+        
     df = pd.DataFrame(data)
+    if df.empty:
+        return go.Figure()
     
     # Create separate violin plots for each score range
     fig = go.Figure()
 
-    # Define the ranges and their colors
     ranges = [
         (0, 20, 'red', 'Very Bad'),
         (20, 40, 'orange', 'Bad'),
@@ -197,7 +253,7 @@ def update_box_plot(data):
         mask = (df['score'] >= min_val) & (df['score'] < max_val)
         subset = df[mask]
         
-        if len(subset) > 0:  # Only add if there are points in this range
+        if len(subset) > 0:
             fig.add_trace(go.Violin(
                 y=subset['score'],
                 name=label,
@@ -213,7 +269,7 @@ def update_box_plot(data):
                 ),
                 customdata=subset[['location_name', 'latitude', 'longitude', 'timestamp', 'point_number']].values,
                 hovertemplate="<br>".join([
-                    "<b>%{customdata[4]}</b>",
+                    "<b>Point %{customdata[4]}</b>",
                     "Location: %{customdata[0]}",
                     "Score: %{y}",
                     "Coordinates: (%{customdata[1]:.2f}, %{customdata[2]:.2f})",
@@ -235,16 +291,16 @@ def update_box_plot(data):
             bgcolor="white",
             font_size=12
         ),
-        showlegend=True,  # Show legend for different categories outside the plot
+        showlegend=True,
         legend=dict(
             title='Score Range',
-            orientation='h',  # Horizontal legend
-            y=0.93,  # Position it just above the plot
+            orientation='h',
+            y=0.93,
             x=0.3,
             xanchor='center',
             yanchor='bottom'
         ),
-        violinmode='overlay',  # Overlay the violin plots
+        violinmode='overlay',
         margin=dict(r=50, t=50)
     )
 
@@ -255,9 +311,13 @@ def update_box_plot(data):
     Input('store-data', 'data')
 )
 def update_table(data):
+    if not data:
+        return html.Div("No data available")
+        
     df = pd.DataFrame(data)
+    if df.empty:
+        return html.Div("No data available")
     
-    # Calculate statistics
     stats = {
         'Minimum Score': df['score'].min(),
         'Maximum Score': df['score'].max(),
@@ -266,7 +326,6 @@ def update_table(data):
         'Median Score': df['score'].median()
     }
 
-    # Create table headers with styling
     headers = html.Thead(
         html.Tr([
             html.Th('Statistic', style={
@@ -288,7 +347,6 @@ def update_table(data):
         ])
     )
 
-    # Create table rows with styling
     rows = []
     for stat, value in stats.items():
         row = html.Tr([
@@ -308,7 +366,6 @@ def update_table(data):
         ])
         rows.append(row)
 
-    # Create table with bootstrap styling
     table = dbc.Table(
         [headers, html.Tbody(rows)],
         bordered=True,
@@ -325,7 +382,6 @@ def update_table(data):
         }
     )
     
-    # Wrap table in a container with title
     return html.Div([
         html.H4(
             'Road Condition Score Statistics',
