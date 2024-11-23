@@ -1,27 +1,31 @@
-import ssl
-import certifi
-from geopy.geocoders import Nominatim
-from datetime import datetime
-import time
 
-def getlivegpslocation():
-    # Use certifi to update SSL context
-    geolocator = Nominatim(user_agent="gps_live_tracker", ssl_context=ssl.create_default_context(cafile=certifi.where()))
-    while True:
-        try:
-            location = geolocator.geocode("New York, USA")
+import requests
 
-            if location:
-                latitude = location.latitude
-                longitude = location.longitude
-                timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                print(f"Latitude: {latitude}, Longitude: {longitude}, Timestamp: {timestamp}")
-            else:
-                print("Could not fetch GPS data.")
+# Replace 'YOUR_API_KEY' with your actual Geolocation API key from GCP
+API_KEY = 'AIzaSyAfuGZWe9GhaZW-fguEqzHqKa1SEgVd8Y8'
 
-            time.sleep(5)
-        except Exception as e:
-            print(f"An error occurred: {e}")
-            break
+def get_current_location():
+    url = f"https://www.googleapis.com/geolocation/v1/geolocate?key={API_KEY}"
+    
+    try:
+        # Sending a POST request to the API
+        response = requests.post(url, json={})
+        response.raise_for_status()
+        
+        # Parsing the response
+        location_data = response.json()
+        latitude = location_data['location']['lat']
+        longitude = location_data['location']['lng']
+        
+        return latitude, longitude
+    
+    except requests.exceptions.RequestException as e:
+        print(f"Error fetching location data: {e}")
+        return None, None
 
-getlivegpslocation()
+# Get the current location
+lat, lng = get_current_location()
+if lat and lng:
+    print(f"Current Location: Latitude = {lat}, Longitude = {lng}")
+else:
+    print("Unable to fetch location data.")
