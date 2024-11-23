@@ -1,4 +1,6 @@
 blinker==1.9.0
+ultralytics
+opencv-python
 certifi==2024.8.30
 charset-normalizer==3.4.0
 click==8.1.7

@@ -2,7 +2,7 @@ from ultralytics import YOLO
 import cv2
 import os
 
-def process_video(video_path, model_path="weights/best.pt", output_frames_dir="outputs/", conf_thresh=0.25, iou_thresh=0.5, save=True):
+def process_video(video_path, model_path="weights/best.pt", output_dir="output.avi", conf_thresh=0.25, iou_thresh=0.5, save=False):
     """
     Process a video file using a YOLO model to perform object detection and save results.
 
@@ -19,18 +19,13 @@ def process_video(video_path, model_path="weights/best.pt", output_frames_dir="o
     # Initialize video capture
     cap = cv2.VideoCapture(video_path)
     
-    if save:
-        os.path.join(output_frames_dir, os.path.basename(video_path))
-        os.makedirs(output_frames_dir, exist_ok=True)
-
     # save the video
-    fourcc = cv2.VideoWriter_fourcc(*'XVID')
-
     fps = cap.get(cv2.CAP_PROP_FPS)
-    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))                                                 
-
-    out = cv2.VideoWriter(output_frames_dir, fourcc, fps, (width, height))
+    if save:
+        fourcc = cv2.VideoWriter_fourcc(*'XVID')
+        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))                                                 
+        out = cv2.VideoWriter(output_dir, fourcc, fps, (width, height))
     
     if not cap.isOpened():
         print(f"Error: Could not open video {video_path}")
@@ -73,6 +68,10 @@ def process_video(video_path, model_path="weights/best.pt", output_frames_dir="o
         score = 1 - (boxes_area / area)
         cv2.putText(frame, f"Score: {score:.2f}",
                     (30, 30), cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 255, 0), 2)
+        # fps
+        # cv2.putText(frame, f"FPS: {fps:.2f}",
+        #            (30, 60), cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 255, 0), 2)
+        
         
         # Save the processed frame
         # cv2.imwrite(os.path.join(output_frames_dir, f"frame_{frame_num}.jpg"), frame)
@@ -88,4 +87,4 @@ def process_video(video_path, model_path="weights/best.pt", output_frames_dir="o
     # Release resources
     cap.release()
     cv2.destroyAllWindows()
-    print(f"Processed {frame_num} frames. Saved results in {output_frames_dir}.")
+    print(f"Processed {frame_num} frames. Saved results in {output_dir}.")
