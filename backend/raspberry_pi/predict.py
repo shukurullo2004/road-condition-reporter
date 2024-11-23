@@ -2,20 +2,38 @@ from ultralytics import YOLO
 import cv2
 import requests
 from datetime import datetime
-from gpsfetching import get_current_location
+import numpy as np
+from datetime import timedelta
 
-DASHBOARD_URL = "http://localhost:3000"
+DASHBOARD_URL = "http://127.0.0.1:8050/add_point"
 
-def process_video(video_path,output_dir="output.avi", conf_thresh=0.25, iou_thresh=0.5, score_thresh = 0.7, save=False):
+# Mock GPS locations and timestamps
+start_lat, start_lon = 37.453277, 126.657042
+end_lat, end_lon = 37.453638, 126.658605
+start_time = datetime(2024, 11, 23, 16, 30, 3)
+end_time = datetime(2024, 11, 23, 16, 31, 4)
+total_duration = (end_time - start_time).total_seconds()
+fps = 30
+num_frames = int(total_duration * fps)
+
+latitudes = np.linspace(start_lat, end_lat, num_frames)
+longitudes = np.linspace(start_lon, end_lon, num_frames)
+timestamps = [start_time + timedelta(seconds=i / fps) for i in range(num_frames)]
+
+def get_mock_location(frame_index):
+    return latitudes[frame_index], longitudes[frame_index], timestamps[frame_index].strftime("%Y-%m-%d %H:%M:%S")
+
+def process_video(video_path, output_dir="output.avi", conf_thresh=0.25, iou_thresh=0.5, score_thresh=0.7, save=False):
     """
     Process a video file using a YOLO model to perform object detection and save results.
 
     Parameters:
         video_path (str): Path to the input video file.
-        model_path (str): Path to the YOLO model weights file.
-        output_frames_dir (str): Directory to save processed frames.
+        output_dir (str): Directory to save processed video.
         conf_thresh (float): Confidence threshold for detection.
         iou_thresh (float): IoU threshold for detection.
+        score_thresh (float): Score threshold to trigger warnings.
+        save (bool): Whether to save the processed video.
     """
     # Load the YOLO model
     model = YOLO("backend/raspberry_pi/weights/best.pt")
@@ -23,7 +41,7 @@ def process_video(video_path,output_dir="output.avi", conf_thresh=0.25, iou_thre
     # Initialize video capture
     cap = cv2.VideoCapture(video_path)
     
-    # save the video
+    # Save the video
     fps = cap.get(cv2.CAP_PROP_FPS)
     if save:
         fourcc = cv2.VideoWriter_fourcc(*'XVID')
@@ -34,7 +52,6 @@ def process_video(video_path,output_dir="output.avi", conf_thresh=0.25, iou_thre
     if not cap.isOpened():
         print(f"Error: Could not open video {video_path}")
         return
-
     
     frame_num = 0
     while True:
@@ -43,11 +60,8 @@ def process_video(video_path,output_dir="output.avi", conf_thresh=0.25, iou_thre
             print("End of video or failed to capture frame.")
             break
         
-        # get current location
-        lat, lng = get_current_location()
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        # Get frame dimensions and area
-        area = frame.shape[0] * frame.shape[1]
+        # Get mock location and timestamp
+        lat, lng, timestamp = get_mock_location(frame_num)
         frame_num += 1
 
         # Run inference on the frame
@@ -55,6 +69,7 @@ def process_video(video_path,output_dir="output.avi", conf_thresh=0.25, iou_thre
         
         # Initialize total boxes area
         boxes_area = 0
+        area = frame.shape[0] * frame.shape[1]
         
         for result in results:
             boxes = result.boxes  # Use the boxes property
@@ -84,26 +99,20 @@ def process_video(video_path,output_dir="output.avi", conf_thresh=0.25, iou_thre
                     (30, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
         cv2.putText(frame, f"Timestamp: {timestamp}",
                     (30, 150), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-        # fps
-        # cv2.putText(frame, f"FPS: {fps:.2f}",
-        #            (30, 60), cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 255, 0), 2)
-        
         
         # Save the processed frame
-        # cv2.imwrite(os.path.join(output_frames_dir, f"frame_{frame_num}.jpg"), frame)
         if save:
             out.write(frame)
         
-        # make payload of longitude, latitude, timestamp, score
+        # Make payload and send to dashboard
         payload = {
             "longitude": lng,
             "latitude": lat,
             "timestamp": timestamp,
-            "score": score
+            "score": score*100
         }
         
         requests.post(DASHBOARD_URL, json=payload)
-        
         
         cv2.imshow("frame", frame)
         if cv2.waitKey(1) & 0xFF == ord('q'):
@@ -111,5 +120,7 @@ def process_video(video_path,output_dir="output.avi", conf_thresh=0.25, iou_thre
 
     # Release resources
     cap.release()
+    if save:
+        out.release()
     cv2.destroyAllWindows()
     print(f"Processed {frame_num} frames. Saved results in {output_dir}.")

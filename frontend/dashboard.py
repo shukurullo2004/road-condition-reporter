@@ -201,7 +201,7 @@ def add_point():
             })
             
             # Keep only the last 100 points to prevent memory issues
-            if len(data_store) > 100:
+            if len(data_store) > 100000:
                 data_store.pop(0)
                 
             return jsonify({'status': 'success', 'message': 'Data received'}), 200
@@ -243,9 +243,9 @@ def update_pie_chart(data):
     ranges = [
         (0, 20, '#dc3545', 'Very Bad'),
         (20, 40, '#fd7e14', 'Bad'),
-        (40, 70, '#ffc107', 'Moderate'),
-        (70, 80, '#87cf3a', 'Good'),
-        (80, 100, '#28a745', 'Very Good')
+        (40, 80, '#ffc107', 'Moderate'),
+        (80, 90, '#87cf3a', 'Good'),
+        (90, 100, '#28a745', 'Very Good')
     ]
     
     score_distribution = []
