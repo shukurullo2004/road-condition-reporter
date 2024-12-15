@@ -3,13 +3,208 @@ import dash_bootstrap_components as dbc
 import pandas as pd
 from dash.dependencies import Input, Output
 import plotly.express as px
-from geopy.geocoders import Nominatim # type: ignore
+from geopy.geocoders import Nominatim  # type: ignore
 import plotly.graph_objects as go
 import json
 import os
 from datetime import datetime
+from flask import request, jsonify
 
-app = Dash(__name__)
+app = Dash(
+    __name__,
+    suppress_callback_exceptions=True,
+    index_string='''
+<!DOCTYPE html>
+<html>
+    <head>
+        {%metas%}
+        <title>Road Condition Reporter</title>
+        {%favicon%}
+        {%css%}
+        <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyA4QiU6Fqw2zXBAeGJF2KPMM9xC0Fnug-Q&libraries=maps,marker&v=beta" defer></script>
+        <script>
+            let map;
+            let markers = [];
+            
+            function getScoreColor(score) {
+                if (score >= 80) return '#28a745';  // Green for very good
+                if (score >= 60) return '#87cf3a';  // Light green for good
+                if (score >= 40) return '#ffc107';  // Yellow for moderate
+                if (score >= 20) return '#fd7e14';  // Orange for bad
+                return '#dc3545';                   // Red for very bad
+            }
+
+            // Wait for the Google Maps API to load
+            window.addEventListener('load', function() {
+                // Initialize empty map
+                map = new google.maps.Map(document.getElementById('map'), {
+                    zoom: 2,
+                    center: { lat: 0, lng: 0 },
+                    mapId: 'DEMO_MAP_ID'
+                });
+            });
+            
+            function clearMarkers() {
+                markers.forEach(marker => marker.setMap(null));
+                markers = [];
+            }
+            
+            window.dashExtensions = {
+                updateMap: function(locationData) {
+                    if (!map) return;
+                    
+                    clearMarkers();
+                    const locations = JSON.parse(locationData);
+                    
+                    if (!locations || locations.length === 0) return;
+                    
+                    // Get the first location for initial center
+                    const center = { 
+                        lat: locations[0].lat, 
+                        lng: locations[0].lng 
+                    };
+                    
+                    map.setCenter(center);
+                    
+                    // Add markers for all locations
+                    locations.forEach(loc => {
+                        const markerColor = getScoreColor(loc.score);
+                        
+                        const marker = new google.maps.Marker({
+                            position: { lat: loc.lat, lng: loc.lng },
+                            map: map,
+                            title: `Score: ${loc.score}`,
+                            icon: {
+                                path: google.maps.SymbolPath.CIRCLE,
+                                fillColor: markerColor,
+                                fillOpacity: 0.8,
+                                strokeWeight: 2,
+                                strokeColor: '#ffffff',
+                                scale: 10
+                            }
+                        });
+                        
+                        // Add info window
+                        const infowindow = new google.maps.InfoWindow({
+                            content: `
+                                <div style="padding: 10px;">
+                                    <h3 style="margin: 0 0 10px 0;">Location Details</h3>
+                                    <p><strong>Score:</strong> ${loc.score}</p>
+                                    <p><strong>Time:</strong> ${loc.timestamp}</p>
+                                    <p><strong>Coordinates:</strong> ${loc.lat.toFixed(4)}, ${loc.lng.toFixed(4)}</p>
+                                </div>
+                            `
+                        });
+                        
+                        marker.addListener('click', () => {
+                            infowindow.open(map, marker);
+                        });
+                        
+                        markers.push(marker);
+                    });
+                    
+                    // Fit bounds to show all markers
+                    if (markers.length > 1) {
+                        const bounds = new google.maps.LatLngBounds();
+                        markers.forEach(marker => bounds.extend(marker.getPosition()));
+                        map.fitBounds(bounds);
+                    }
+                }
+            };
+        </script>
+        <style>
+            .dashboard-container {
+                display: flex;
+                flex-direction: column;
+                gap: 20px;
+                padding: 20px;
+                max-width: 1400px;
+                margin: 0 auto;
+            }
+            
+            .map-container {
+                width: 100%;
+                height: 600px;
+                border-radius: 8px;
+                overflow: hidden;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            }
+            
+            .plots-container {
+                display: flex;
+                flex-direction: column;
+                gap: 20px;
+                width: 100%;
+            }
+            
+            .plot {
+                width: 100%;
+                height: 700px;
+                background: white;
+                border-radius: 8px;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            }
+            
+            .stats-container {
+                width: 100%;
+                max-width: 1000px;
+                margin: 0 auto;
+                background: white;
+                border-radius: 8px;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                padding: 20px;
+            }
+            
+            .file-selector {
+                width: 100%;
+                margin-bottom: 20px;
+                padding: 20px;
+                background: white;
+                border-radius: 8px;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            }
+            
+            h1, h4 {
+                text-align: center;
+                color: #343a40;
+                margin: 20px 0;
+            }
+            
+            .table {
+                width: 100%;
+                border-collapse: collapse;
+                margin-top: 20px;
+            }
+            
+            .table th, .table td {
+                padding: 12px 15px;
+                text-align: left;
+                border: 1px solid #dee2e6;
+            }
+            
+            .table th {
+                background-color: #343a40;
+                color: white;
+            }
+            
+            .table tr:hover {
+                background-color: #f8f9fa;
+            }
+        </style>
+    </head>
+    <body>
+        {%app_entry%}
+        <footer>
+            {%config%}
+            {%scripts%}
+            {%renderer%}
+        </footer>
+    </body>
+</html>
+'''
+)
+
+
 
 # Load data
 def get_available_files():
@@ -18,6 +213,8 @@ def get_available_files():
     files = [f for f in os.listdir(data_dir) if f.endswith('.csv')]
     return sorted(files, reverse=True)  # Most recent first
 
+# Global data store to hold incoming data
+data_store = []
 
 # Cache file path
 CACHE_FILE = 'location_cache.json'
@@ -37,11 +234,11 @@ def save_cache(cache):
 def get_location_name(lat, lon, cache):
     """Get location name from coordinates or cache"""
     cache_key = f"{lat:.4f},{lon:.4f}"
-    
+
     # Return cached result if available
     if cache_key in cache:
         return cache[cache_key]
-    
+
     # If not in cache, fetch from API
     geolocator = Nominatim(user_agent="road_condition_reporter")
     try:
@@ -50,7 +247,7 @@ def get_location_name(lat, lon, cache):
             addr = location.raw['address']
             street = addr.get('road', addr.get('highway', ''))
             city = addr.get('city', addr.get('town', addr.get('village', '')))
-            
+
             result = f"{street}, {city}" if street and city else f"({lat:.2f}, {lon:.2f})"
             cache[cache_key] = result
             return result
@@ -59,77 +256,119 @@ def get_location_name(lat, lon, cache):
         cache[cache_key] = result
         return result
 
-def prepare_data(data):
-    df = pd.DataFrame(data)
+def prepare_data(df):
     df['point_number'] = range(1, len(df) + 1)
-    
+
     # Load cached locations
     cache = load_cache()
     print("Fetching location names...")
-    
+
     # Get location names using cache
     df['location_name'] = df.apply(
-        lambda row: get_location_name(row['latitude'], row['longitude'], cache), 
+        lambda row: get_location_name(row['latitude'], row['longitude'], cache),
         axis=1
     )
-    
+
     # Save updated cache
     save_cache(cache)
     return df
 
+
+
+# Flask route to receive POST requests
+@app.server.route('/data', methods=['POST'])
+def receive_data():
+    global data_store
+    data = request.get_json()
+    if data:
+        # Expected data format: dictionary with keys 'latitude', 'longitude', 'timestamp', 'score'
+        data_store.append(data)
+        return jsonify({'status': 'success'}), 200
+    else:
+        return jsonify({'status': 'error', 'message': 'No data received'}), 400
+
+
+
+
+
 app.layout = html.Div([
-    # Outer container to center everything
     html.Div([
-        html.H1('Road Condition Reporter', className='text-center mb-4', style={'text-align': 'center'}),
-        # File selection section
+        html.H1('Road Condition Reporter'),
         html.Div([
-            html.H5('Select Data File:', 
-                   style={'margin-bottom': '10px'}),
+            html.H5('Select Data File:'),
             dcc.Dropdown(
                 id='file-selector',
                 options=[{'label': f, 'value': f} for f in get_available_files()],
                 value=get_available_files()[0] if get_available_files() else None,
-                style={'width': '100%', 'margin-bottom': '20px'}
             ),
-            # File info display
-            html.Div(id='file-info', style={'margin-bottom': '20px'})
-        ], style={'margin-bottom': '30px'}),
+            html.Div(id='file-info')
+        ], className='file-selector'),
+        
+        html.Div(id='map', className='map-container'),
+        
         dcc.Store(id='store-data'),
-        html.Div(
-            style={
-                'display': 'flex',
-                'justifyContent': 'center',
-                'alignItems': 'center',
-                'flexDirection': 'column',
-                'width': '100%'
-            },
-            children=[
-                dcc.Graph(
-                    id='line-graph',
-                    style={'width': '100%', 'height': '700px'}
-                ),
-                dcc.Graph(
-                    id='box-plot',
-                    style={'width': '100%', 'height': '700px'}
-                ),
-                html.Div(
-                    id='table',
-                    style={'width': '100%', 'maxWidth': '1000px', 'margin': '0 auto'}
-                )
-            ]
-        )    
-    ], style={
-        'width': '90%',
-        'maxWidth': '1400px',
-        'margin': '0 auto',
-        'padding': '20px'
-    })
-], style={
-    'display': 'flex',
-    'justifyContent': 'center',
-    'alignItems': 'center',
-    'width': '100%',
-})
+        dcc.Store(id='map-data'),
+        
+        html.Div([
+                dcc.Interval(
+                id='interval-component',
+                interval=1000,  # Update every 5 seconds
+                n_intervals=0
+            ),
+            dcc.Graph(
+                id='line-graph',
+                className='plot'
+            ),
+            dcc.Graph(
+                id='box-plot',
+                className='plot'
+            ),
+            html.Div(
+                id='table',
+                className='stats-container'
+            )
+        ], className='plots-container')
+        
+    ], className='dashboard-container')
+])
+
+@app.callback(
+    Output('map-data', 'data'),
+    Input('store-data', 'data'),
+)
+def update_map_data(data):
+    if not data:
+        return '[]'
+        
+    df = pd.DataFrame(data)
+    if df.empty:
+        return '[]'
+    
+    # Prepare location data for the map
+    locations = []
+    for _, row in df.iterrows():
+        locations.append({
+            'lat': float(row['latitude']),
+            'lng': float(row['longitude']),
+            'score': float(row['score']),
+            'timestamp': row['timestamp']
+        })
+    
+    return json.dumps(locations)
+
+# Add a clientside callback to update the map
+app.clientside_callback(
+    """
+    function(locationData) {
+        if (locationData) {
+            window.dashExtensions.updateMap(locationData);
+        }
+        return window.dash_clientside.no_update;
+    }
+    """,
+    Output('map', 'children'),
+    Input('map-data', 'data')
+)
 
 @app.callback(
     [Output('store-data', 'data'),
@@ -230,7 +469,7 @@ def update_graph(data):
     Output('box-plot', 'figure'),
     Input('store-data', 'data')
 )
-def update_box_plot(data):
+def update_pie_chart(data):
     if not data:
         return go.Figure()
         
@@ -238,70 +477,52 @@ def update_box_plot(data):
     if df.empty:
         return go.Figure()
     
-    # Create separate violin plots for each score range
-    fig = go.Figure()
-
+    # Define score ranges and colors
     ranges = [
-        (0, 20, 'red', 'Very Bad'),
-        (20, 40, 'orange', 'Bad'),
-        (40, 60, 'yellow', 'Moderate'),
-        (60, 80, 'lightgreen', 'Good'),
-        (80, 100, 'green', 'Very Good')
+        (0, 20, '#dc3545', 'Very Bad'),
+        (20, 40, '#fd7e14', 'Bad'),
+        (40, 60, '#ffc107', 'Moderate'),
+        (60, 80, '#87cf3a', 'Good'),
+        (80, 100, '#28a745', 'Very Good')
     ]
-
+    
+    # Calculate the count of scores in each range
+    score_distribution = []
+    labels = []
+    colors = []
     for min_val, max_val, color, label in ranges:
-        mask = (df['score'] >= min_val) & (df['score'] < max_val)
-        subset = df[mask]
-        
-        if len(subset) > 0:
-            fig.add_trace(go.Violin(
-                y=subset['score'],
-                name=label,
-                box_visible=True,
-                meanline_visible=True,
-                points='all',
-                line_color=color,
-                fillcolor=color,
-                opacity=0.6,
-                marker=dict(
-                    size=8,
-                    color=color
-                ),
-                customdata=subset[['location_name', 'latitude', 'longitude', 'timestamp', 'point_number']].values,
-                hovertemplate="<br>".join([
-                    "<b>Point %{customdata[4]}</b>",
-                    "Location: %{customdata[0]}",
-                    "Score: %{y}",
-                    "Coordinates: (%{customdata[1]:.2f}, %{customdata[2]:.2f})",
-                    "Time: %{customdata[3]}",
-                    "<extra></extra>"
-                ])
-            ))
+        count = len(df[(df['score'] >= min_val) & (df['score'] < max_val)])
+        if count > 0:  # Only add to pie chart if there are values in this range
+            score_distribution.append(count)
+            labels.append(f"{label} ({min_val}-{max_val})")
+            colors.append(color)
+
+    # Create pie chart
+    fig = go.Figure(data=[go.Pie(
+        labels=labels,
+        values=score_distribution,
+        marker=dict(colors=colors),
+        hovertemplate="<br>".join([
+            "Category: %{label}",
+            "Count: %{value}",
+            "Percentage: %{percent}",
+            "<extra></extra>"
+        ]),
+        textinfo='percent+label',
+        hole=0.3  # Makes it a donut chart - remove this line or set to 0 for a regular pie chart
+    )])
 
     fig.update_layout(
         title='Road Condition Scores Distribution',
-        yaxis_title='Condition Score',
-        yaxis=dict(
-            gridcolor='LightGrey',
-            showgrid=True,
-            range=[0, 100]
-        ),
-        hovermode='closest',
-        hoverlabel=dict(
-            bgcolor="white",
-            font_size=12
-        ),
         showlegend=True,
         legend=dict(
-            title='Score Range',
             orientation='h',
-            y=0.93,
-            x=0.3,
+            yanchor='bottom',
+            y=1.0,
             xanchor='center',
-            yanchor='bottom'
+            x=0.5
         ),
-        violinmode='overlay',
-        margin=dict(r=50, t=50)
+        margin=dict(t=50, l=20, r=20, b=20)
     )
 
     return fig
