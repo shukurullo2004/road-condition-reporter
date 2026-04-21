@@ -39,6 +39,6 @@ The **Road Condition Reporter System** is an IoT-based application aimed at moni
 
 ---
 
-[Canvas]([https://www.canva.com/design/DAGXuC85T8I/ED5cj-83cnFVowo5ZT2J3g/](https://canva.link/2298gty6r6fdrnz))
+[Canvas]([https://canva.link/2298gty6r6fdrnz])
 
 This project is developed as part of our IoT course to apply IoT concepts in a practical and impactful way. ✨
